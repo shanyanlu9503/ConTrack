@@ -9,17 +9,50 @@ function extractEntities(rawText, fileType) {
     return { parties: [], contract: {}, items: [], raw_text: rawText };
   }
 
-  // 按行分割，保留换行结构
-  const lines = normalizeLines(rawText);
+  let fullText = rawText;
+  let parties = null;
 
-  // 阶段 1: 划分当事人文本区域（基于 section header + 角色标签）
+  // 预处理1: Excel格式 - 剥离 [A1] 前缀并统一分隔符
+  if (/\[[A-Z]+\d+\]/.test(rawText)) {
+    fullText = fullText
+      .replace(/\[[A-Z]+\d+\][ \t]*/g, '')
+      .replace(/[ \t]*\|[ \t]*/g, ' ||| ');
+  }
+
+  // 预处理2: 表格分隔符格式 (PDF/Excel)
+  if (fullText.includes(' ||| ')) {
+    const preprocessed = preprocessTableText(fullText);
+    fullText = preprocessed.fullText;
+    parties = preprocessed.parties;
+  }
+
+  // 预处理3: Word/mammoth 双栏交错格式
+  if (!parties && detectInterleavedFormat(fullText)) {
+    const preprocessed = preprocessInterleavedText(fullText);
+    fullText = preprocessed.fullText;
+    parties = preprocessed.parties;
+  }
+
+  // 按行分割
+  const lines = normalizeLines(fullText);
+
+  // 阶段 1: 划分当事人文本区域
   const partySections = splitPartySections(lines);
 
   // 阶段 2: 逐行提取每个当事人的字段
-  const parties = partySections.map(sec => extractFieldsFromSection(sec.lines, sec.role, sec.side, sec.fullText));
+  const extractedParties = partySections.map(sec =>
+    extractFieldsFromSection(sec.lines, sec.role, sec.side, sec.fullText)
+  );
 
-  // 阶段 3: 提取合同级字段（从开头文本 + 全文）
-  const fullText = lines.join('\n');
+  // 如果表格预处理已识别当事人，合并信息（表格数据更精确）
+  if (parties) {
+    for (let i = 0; i < Math.min(parties.length, extractedParties.length); i++) {
+      // 表格数据优先，空缺字段用逐行提取补充
+      extractedParties[i] = mergePartyData(parties[i], extractedParties[i]);
+    }
+  }
+
+  // 阶段 3: 提取合同级字段
   const contract = extractContractFields(fullText);
 
   // 阶段 4: 提取产品明细
@@ -27,15 +60,14 @@ function extractEntities(rawText, fileType) {
 
   // 阶段 5: 类型推断与校验
   contract.contract_type = inferContractType(fullText, contract);
-  // 如果有采购/销售关键词，校正买卖方
-  parties.forEach(party => {
+  extractedParties.forEach(party => {
     party.side = inferPartySide(party.role, party.side, contract.contract_type, fullText);
   });
 
   // 校验和清理
-  validateParties(parties);
+  validateParties(extractedParties);
 
-  // 自动汇总：合同总金额为空但产品明细有数据时自动累加
+  // 自动汇总
   if ((!contract.total_amount) && items.length > 0) {
     contract.total_amount = items.reduce((sum, it) => sum + (it.amount || 0), 0);
     if (!contract.tax_amount) {
@@ -43,7 +75,234 @@ function extractEntities(rawText, fileType) {
     }
   }
 
-  return { parties, contract, items, raw_text: rawText };
+  return { parties: extractedParties, contract, items, raw_text: rawText };
+}
+
+// ==================== 双列表格预处理 ====================
+
+/**
+ * 将 pdf-parse v2 的 cellSeparator 表格输出转为标准文本格式
+ * 表格格式: 每行列1=甲方标签 | 列2=甲方值 | 列3=乙方标签 | 列4=乙方值
+ */
+function preprocessTableText(rawText) {
+  const labelMap = {
+    '单位名称': '单位名称', '公司名称': '单位名称',
+    '甲': '单位名称', '乙': '单位名称',  // 表头行的公司名
+    '住所': '地址', '地址': '地址',
+    '法定代表人': '法定代表人', '法人': '法定代表人',
+    '委托代理人': '委托代理人', '代理人': '委托代理人', '联系人': '委托代理人',
+    '电话': '电话', '联系电话': '电话',
+    '开户行': '开户行', '开户银行': '开户行',
+    '账号': '账号', '银行账号': '账号',
+    '税号': '税号', '纳税人识别号': '税号',
+  };
+
+  // 产品相关标签（不应归于当事人信息）
+  const productLabels = new Set(['产品名称', '规格', '规格型号', '数量', '单位', '单价', '金额', '税率', '税额']);
+
+  const lines = rawText.split('\n').filter(l => l.trim());
+  const partyALines = [];
+  const partyBLines = [];
+  const otherLines = [];
+
+  let partyARole = '甲方';
+  let partyBRole = '乙方';
+
+  for (const line of lines) {
+    if (!line.includes(' ||| ')) {
+      otherLines.push(line);
+      continue;
+    }
+
+    const cells = line.split(' ||| ').map(c => c.trim());
+
+    // 4列=双栏表格
+    if (cells.length >= 4) {
+      const aLabel = cells[0] || '';
+      const aValue = cells[1] || '';
+      const bLabel = cells[2] || '';
+      const bValue = cells[3] || '';
+
+      // 检测当事人角色
+      if (aLabel === '甲' || aLabel === '卖方' || aLabel === '供方') {
+        partyARole = aLabel === '供方' ? '供方' : (aLabel === '卖方' ? '卖方' : '甲方');
+      }
+      if (bLabel === '乙' || bLabel === '买方' || bLabel === '需方') {
+        partyBRole = bLabel === '需方' ? '需方' : (bLabel === '买方' ? '买方' : '乙方');
+      }
+
+      // 产品行放 otherLines
+      if (productLabels.has(aLabel) || productLabels.has(bLabel)) {
+        if (aValue) otherLines.push(`${aLabel}：${aValue}`);
+        if (bValue) otherLines.push(`${bLabel}：${bValue}`);
+        continue;
+      }
+
+      // 映射标签
+      const mappedALabel = labelMap[aLabel] || aLabel;
+      const mappedBLabel = labelMap[bLabel] || bLabel;
+
+      if (aLabel && aLabel !== '方' && aValue) {
+        partyALines.push(`${mappedALabel}：${aValue}`);
+      }
+      if (bLabel && bLabel !== '方' && bValue) {
+        partyBLines.push(`${mappedBLabel}：${bValue}`);
+      }
+    }
+  }
+
+  // 构建标准格式文本
+  const fullText = [
+    `${partyARole}：`,
+    ...partyALines,
+    '',
+    `${partyBRole}：`,
+    ...partyBLines,
+    '',
+    ...otherLines,
+  ].join('\n');
+
+  // 预提取当事人基本信息
+  const parties = [
+    extractFieldsFromSection(partyALines, partyARole, guessSide(partyARole, fullText), ''),
+    extractFieldsFromSection(partyBLines, partyBRole, guessSide(partyBRole, fullText), ''),
+  ];
+
+  return { fullText, parties };
+}
+
+/**
+ * 合并两个 party 数据，tableParty 优先
+ */
+function mergePartyData(tableParty, lineParty) {
+  const merged = { ...lineParty, ...tableParty };
+  // 保留非空的 tableParty 值，否则用 lineParty
+  Object.keys(merged).forEach(key => {
+    if (tableParty[key] && tableParty[key].trim()) {
+      merged[key] = tableParty[key];
+    } else if (lineParty[key] && lineParty[key].trim()) {
+      merged[key] = lineParty[key];
+    }
+  });
+  return merged;
+}
+
+// ==================== Word 双栏交错格式预处理 ====================
+
+// 已知的当事人字段标签（会出现在表格两列中的）
+const PARTY_FIELD_LABELS = new Set([
+  '甲', '乙', '甲方', '乙方', '买方', '卖方', '需方', '供方',
+  '单位名称', '住所', '地址', '法定代表人', '法人',
+  '委托代理人', '代理人', '联系人', '电话', '联系电话',
+  '开户行', '开户银行', '账号', '银行账号', '税号', '纳税人识别号',
+]);
+
+/**
+ * 检测 Word/mammoth 双栏交错格式：
+ * 标签和值交替出现在各独立行中，同一标签在短窗口内出现两次
+ */
+function detectInterleavedFormat(text) {
+  const lines = text.split('\n').filter(l => l.trim());
+  const labelCount = new Map();
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (PARTY_FIELD_LABELS.has(trimmed)) {
+      labelCount.set(trimmed, (labelCount.get(trimmed) || 0) + 1);
+    }
+  }
+  // 至少有3个标签出现了2次 = 双栏结构
+  let dupCount = 0;
+  for (const count of labelCount.values()) {
+    if (count >= 2) dupCount++;
+  }
+  return dupCount >= 3;
+}
+
+/**
+ * 将 Word/mammoth 交替格式转为标准两段文本
+ * 输入: 标签1\n值1\n标签2\n值2\n... (左右列交替)
+ * 输出: 甲方：\n标签1：值1\n...\n\n乙方：\n标签1：值2\n...
+ */
+function preprocessInterleavedText(rawText) {
+  const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const partyALines = [];
+  const partyBLines = [];
+  const otherLines = [];
+
+  let partyARole = '甲方';
+  let partyBRole = '乙方';
+
+  // 收集所有的标签-值对
+  const pairs = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (PARTY_FIELD_LABELS.has(line) && i + 1 < lines.length) {
+      const nextLine = lines[i + 1];
+      // 如果下一行也是已知标签，跳过（可能是连续标签）
+      if (PARTY_FIELD_LABELS.has(nextLine)) continue;
+      pairs.push({ label: line, value: nextLine });
+      i++; // 跳过值行
+    } else {
+      otherLines.push(line);
+    }
+  }
+
+  // 将标签-值对按交替位置奇偶分配给两个当事人
+  // 双栏表格中标签交替出现：偶索引→甲方(左列)，奇索引→乙方(右列)
+  for (let idx = 0; idx < pairs.length; idx++) {
+    const pair = pairs[idx];
+    const normLabel = normalizeLabel(pair.label);
+    const isPartyA = (idx % 2 === 0);
+
+    // 检测当事人角色
+    if (pair.label === '甲' || pair.label === '甲方' || pair.label === '卖方' || pair.label === '供方') {
+      if (isPartyA) partyARole = pair.label; else partyBRole = pair.label;
+    }
+    if (pair.label === '乙' || pair.label === '乙方' || pair.label === '买方' || pair.label === '需方') {
+      if (isPartyA) partyARole = pair.label; else partyBRole = pair.label;
+    }
+
+    if (isPartyA) {
+      partyALines.push(`${normLabel}：${pair.value}`);
+    } else {
+      partyBLines.push(`${normLabel}：${pair.value}`);
+    }
+  }
+
+  const fullText = [
+    `${partyARole}：`,
+    ...partyALines,
+    '',
+    `${partyBRole}：`,
+    ...partyBLines,
+    '',
+    ...otherLines,
+  ].join('\n');
+
+  const parties = [
+    extractFieldsFromSection(partyALines, partyARole, guessSide(partyARole, fullText), ''),
+    extractFieldsFromSection(partyBLines, partyBRole, guessSide(partyBRole, fullText), ''),
+  ];
+
+  return { fullText, parties };
+}
+
+function normalizeLabel(label) {
+  const map = {
+    '甲': '单位名称', '乙': '单位名称',
+    '甲方': '单位名称', '乙方': '单位名称',
+    '买方': '单位名称', '卖方': '单位名称',
+    '需方': '单位名称', '供方': '单位名称',
+    '住所': '地址', '法人': '法定代表人',
+    '代理人': '委托代理人', '联系人': '委托代理人',
+    '单位名称': '单位名称', '公司名称': '单位名称',
+    '法定代表人': '法定代表人', '委托代理人': '委托代理人',
+    '电话': '电话', '联系电话': '电话',
+    '开户行': '开户行', '开户银行': '开户行',
+    '账号': '账号', '银行账号': '账号',
+    '税号': '税号', '纳税人识别号': '税号',
+  };
+  return map[label] || label;
 }
 
 // ==================== 文本预处理 ====================
@@ -165,7 +424,7 @@ function extractFieldsFromSection(lines, role, side, fullText) {
   const fieldRules = [
     ['name', [
       /^单位名称[：:](.+)/, /^公司名称[：:](.+)/, /^企业名称[：:](.+)/,
-      /^名\s*称[：:](.+)/, /^'+role+'[：:](.+)/,
+      /^'+role+'[：:](.+)/,
     ]],
     ['legal_representative', [
       /^法定代表人[：:](.+)/, /^法人代表[：:](.+)/, /^法\s*人[：:](.+)/, /^负责人[：:](.+)/,

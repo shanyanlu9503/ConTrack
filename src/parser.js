@@ -3,17 +3,36 @@
 
 const fs = require('fs');
 const path = require('path');
-const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const ExcelJS = require('exceljs');
+const { PDFParse } = require('pdf-parse');
 
 /**
  * 解析 PDF 文件，提取纯文本
+ * 使用 pdf-parse v2 的 table-aware 模式
  */
 async function parsePdf(filePath) {
   const dataBuffer = fs.readFileSync(filePath);
-  const data = await pdfParse(dataBuffer);
-  return data.text || '';
+  const pdf = new PDFParse({ data: dataBuffer });
+
+  // 先尝试带 cellSeparator 表格模式
+  let result = await pdf.getText({
+    cellSeparator: ' ||| ',
+    cellThreshold: 12,     // 列间距阈值(px)，超过此值视为不同列
+    lineThreshold: 5,      // 行间距阈值(px)
+    lineEnforce: true,     // 强制换行
+  });
+
+  const text = result.text || '';
+
+  // 如果提取结果太少（可能是扫描版），用默认模式再试
+  if (text.length < 50) {
+    const pdf2 = new PDFParse({ data: dataBuffer });
+    const r2 = await pdf2.getText();
+    return r2.text || '';
+  }
+
+  return text;
 }
 
 /**
@@ -26,23 +45,20 @@ async function parseDocx(filePath) {
 
 /**
  * 解析 Excel (.xlsx) 文件，返回结构化文本和 cellMap
- * @returns {{ text: string, cellMap: Map<string, {value: any, type: string}> }}
  */
 async function parseExcelText(filePath) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(filePath);
 
   const lines = [];
-  const cellMap = new Map(); // key: "row,col" → {value, type}
+  const cellMap = new Map();
 
   workbook.eachSheet((worksheet, sheetIndex) => {
-    if (sheetIndex > 0) lines.push(''); // sheet 间分隔
+    if (sheetIndex > 0) lines.push('');
 
-    // 处理合并单元格：建立合并区域到主单元格的映射
-    const mergeMap = new Map(); // key: "row,col" → {row, col} of master cell
+    const mergeMap = new Map();
     if (worksheet.model && worksheet.model.merges) {
       worksheet.model.merges.forEach((mergeRange) => {
-        // mergeRange 可能是字符串 "A1:C3" 或包含 top/left/bottom/right 的对象
         let top, left, bottom, right;
         if (typeof mergeRange === 'string') {
           const match = mergeRange.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/);
@@ -61,7 +77,7 @@ async function parseExcelText(filePath) {
         if (top !== undefined && left !== undefined) {
           for (let r = top; r <= bottom; r++) {
             for (let c = left; c <= right; c++) {
-              if (r === top && c === left) continue; // 主单元格
+              if (r === top && c === left) continue;
               mergeMap.set(`${r},${c}`, { row: top, col: left });
             }
           }
@@ -72,7 +88,6 @@ async function parseExcelText(filePath) {
     worksheet.eachRow((row, rowNumber) => {
       const rowCells = [];
       row.eachCell((cell, colNumber) => {
-        // 跳过合并单元格中的从属单元格
         const key = `${rowNumber},${colNumber}`;
         if (mergeMap.has(key)) {
           const master = mergeMap.get(key);
@@ -88,7 +103,7 @@ async function parseExcelText(filePath) {
         else if (typeof value === 'object' && value.richText) {
           value = value.richText.map(t => t.text || '').join('');
         } else if (typeof value === 'object' && value.result !== undefined) {
-          value = value.result; // formula result
+          value = value.result;
         }
 
         const cellInfo = {
@@ -100,8 +115,7 @@ async function parseExcelText(filePath) {
 
         if (String(value).trim()) {
           const colLetter = numToColLetter(colNumber);
-          const addr = `${colLetter}${rowNumber}`;
-          rowCells.push(`[${addr}] ${value}`);
+          rowCells.push(`[${colLetter}${rowNumber}] ${value}`);
         }
       });
       if (rowCells.length > 0) {
@@ -118,8 +132,6 @@ async function parseExcelText(filePath) {
 
 /**
  * 根据文件类型分发解析
- * @param {string} filePath
- * @param {string} fileType - 'pdf' | 'docx' | 'xlsx'
  */
 async function parseFile(filePath, fileType) {
   switch (fileType) {
