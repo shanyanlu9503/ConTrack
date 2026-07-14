@@ -1,0 +1,394 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>合同管理工具</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>📄 合同管理工具</h1>
+      <div class="stats" id="stats"></div>
+    </header>
+    
+    <nav class="tabs">
+      <button class="tab active" data-tab="dashboard">📊 仪表盘</button>
+      <button class="tab" data-tab="companies">🏢 公司管理</button>
+      <button class="tab" data-tab="our-companies">🏭 本公司主体</button>
+      <button class="tab" data-tab="products">📦 产品管理</button>
+      <button class="tab" data-tab="contracts">📝 合同管理</button>
+      <button class="tab" data-tab="delivery">🚚 送货单管理</button>
+      <button class="tab" data-tab="import">📥 导入合同</button>
+      <button class="tab" data-tab="settings">⚙️ 系统设置</button>
+    </nav>
+    
+    <main class="content">
+      <!-- 仪表盘 -->
+      <div class="tab-content active" id="dashboard">
+        <h2>系统概览</h2>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-icon">🏢</div>
+            <div class="stat-info">
+              <div class="stat-value" id="stat-companies">0</div>
+              <div class="stat-label">公司主体</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">📦</div>
+            <div class="stat-info">
+              <div class="stat-value" id="stat-products">0</div>
+              <div class="stat-label">产品数量</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">📝</div>
+            <div class="stat-info">
+              <div class="stat-value" id="stat-contracts">0</div>
+              <div class="stat-label">合同数量</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">🚚</div>
+            <div class="stat-info">
+              <div class="stat-value" id="stat-delivery">0</div>
+              <div class="stat-label">送货单数量</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">💰</div>
+            <div class="stat-info">
+              <div class="stat-value" id="stat-contract-amount">¥0</div>
+              <div class="stat-label">合同总金额</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">💵</div>
+            <div class="stat-info">
+              <div class="stat-value" id="stat-delivery-amount">¥0</div>
+              <div class="stat-label">送货总金额</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- 公司管理 -->
+      <div class="tab-content" id="companies">
+        <div class="section-header">
+          <h2>公司主体管理</h2>
+          <button class="btn btn-primary" onclick="showCompanyModal()">+ 新增公司</button>
+        </div>
+        <div class="filter-bar">
+          <select id="company-type-filter" onchange="loadCompanies()">
+            <option value="">全部类型</option>
+            <option value="customer">客户</option>
+            <option value="supplier">供应商</option>
+          </select>
+          <input type="text" id="company-search" placeholder="搜索公司名称..." oninput="loadCompanies()">
+        </div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>公司名称</th>
+                <th>类型</th>
+                <th>地址</th>
+                <th>联系人</th>
+                <th>电话</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="companies-table"></tbody>
+          </table>
+        </div>
+      
+      <!-- 本公司主体管理 -->
+      <div class="tab-content" id="our-companies">
+        <div class="section-header">
+          <h2>本公司主体管理</h2>
+          <button class="btn btn-primary" onclick="showOurCompanyModal()">+ 新增本公司</button>
+        </div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>公司名称</th>
+                <th>地址</th>
+                <th>法定代表人</th>
+                <th>电话</th>
+                <th>开户行</th>
+                <th>默认</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="our-companies-table"></tbody>
+          </table>
+        </div>
+      </div>
+
+      </div>
+      
+      <!-- 产品管理 -->
+      <div class="tab-content" id="products">
+        <div class="section-header">
+          <h2>产品管理</h2>
+          <button class="btn btn-primary" onclick="showProductModal()">+ 新增产品</button>
+        </div>
+        <div class="filter-bar">
+          <input type="text" id="product-search" placeholder="搜索产品名称..." oninput="loadProducts()">
+        </div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>产品名称</th>
+                <th>规格型号</th>
+                <th>单位</th>
+                <th>含税单价</th>
+                <th>税率(%)</th>
+                <th>备注</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="products-table"></tbody>
+          </table>
+        </div>
+      </div>
+      
+      <!-- 合同管理 -->
+      <div class="tab-content" id="contracts">
+        <div class="section-header">
+          <h2>合同管理</h2>
+          <button class="btn btn-primary" onclick="showContractModal()">+ 新增合同</button>
+        </div>
+        <div class="filter-bar">
+          <select id="contract-type-filter" onchange="loadContracts()">
+            <option value="">全部类型</option>
+            <option value="sales">销售合同</option>
+            <option value="purchase">采购合同</option>
+          </select>
+          <input type="text" id="contract-search" placeholder="搜索合同编号..." oninput="loadContracts()">
+        </div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>合同编号</th>
+                <th>合同类型</th>
+                <th>买方</th>
+                <th>卖方</th>
+                <th>签订日期</th>
+                <th>总金额</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="contracts-table"></tbody>
+          </table>
+        </div>
+      </div>
+      
+      <!-- 送货单管理 -->
+      <div class="tab-content" id="delivery">
+        <div class="section-header">
+          <h2>送货单管理</h2>
+          <button class="btn btn-primary" onclick="showDeliveryModal()">+ 新增送货单</button>
+        </div>
+        <div class="filter-bar">
+          <input type="text" id="delivery-search" placeholder="搜索送货单号..." oninput="loadDeliveryOrders()">
+        </div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>送货单号</th>
+                <th>关联合同</th>
+                <th>客户</th>
+                <th>送货日期</th>
+                <th>收货人</th>
+                <th>总金额</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="delivery-table"></tbody>
+          </table>
+        </div>
+      </div>
+      
+      <!-- 系统设置 -->
+      <div class="tab-content" id="settings">
+        <h2>合同号规则配置</h2>
+        <div class="section-header">
+          <h3>合同号生成规则</h3>
+          <button class="btn btn-primary" onclick="showRuleModal()">+ 新增规则</button>
+        </div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>规则名称</th>
+                <th>前缀</th>
+                <th>日期格式</th>
+                <th>流水号位数</th>
+                <th>重置周期</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="rules-table"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 导入合同 -->
+      <div class="tab-content" id="import">
+        <!-- 步骤指示器 -->
+        <div class="import-steps">
+          <div class="step active" data-step="1"><span class="step-number">1</span><span class="step-label">上传文件</span></div>
+          <div class="step-connector"></div>
+          <div class="step" data-step="2"><span class="step-number">2</span><span class="step-label">数据提取</span></div>
+          <div class="step-connector"></div>
+          <div class="step" data-step="3"><span class="step-number">3</span><span class="step-label">预览确认</span></div>
+          <div class="step-connector"></div>
+          <div class="step" data-step="4"><span class="step-number">4</span><span class="step-label">保存入库</span></div>
+        </div>
+
+        <!-- 步骤1: 上传 -->
+        <div class="import-panel" id="import-upload-panel">
+          <h3>上传合同文件</h3>
+          <div class="upload-zone" id="upload-zone">
+            <div class="upload-icon">📄</div>
+            <p>拖放文件到此处，或点击选择文件</p>
+            <p class="upload-hint">支持 PDF、Excel (.xlsx/.xls)、Word (.docx/.doc) 格式，最大 20MB</p>
+            <input type="file" id="file-input" accept=".pdf,.xlsx,.xls,.docx,.doc" hidden>
+            <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">选择文件</button>
+          </div>
+          <div id="upload-status" class="upload-status" style="display:none"></div>
+          <div id="file-preview" style="display:none" class="file-preview-section">
+            <h4>📋 文件信息</h4>
+            <div id="file-info" class="file-info"></div>
+            <h4>📝 提取的文本内容 (前5000字符)</h4>
+            <pre id="raw-text-preview" class="raw-text-preview"></pre>
+            <div class="form-actions">
+              <button class="btn btn-primary" onclick="goToExtract()">下一步：提取数据 →</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 步骤2-3: 提取预览 -->
+        <div class="import-panel" id="import-extract-panel" style="display:none">
+          <h3>提取的合同数据 (请核对并修正)</h3>
+          <div id="extract-loading" class="loading" style="display:none">
+            <div class="loading-spinner"></div>
+            <p>正在分析合同内容，提取关键信息...</p>
+          </div>
+          <div id="extract-result" style="display:none">
+            <!-- 合同信息 -->
+            <fieldset class="extract-section">
+              <legend>📝 合同信息</legend>
+              <div class="form-row">
+                <div class="form-group"><label>合同编号</label><input type="text" id="ext-contract-no" class="form-control"></div>
+                <div class="form-group"><label>合同类型</label><select id="ext-contract-type"><option value="sales">销售合同</option><option value="purchase">采购合同</option></select></div>
+              </div>
+              <div class="form-row">
+                <div class="form-group"><label>签订日期</label><input type="date" id="ext-sign-date"></div>
+                <div class="form-group"><label>总金额</label><input type="number" step="0.01" id="ext-total-amount"></div>
+              </div>
+              <div class="form-row">
+                <div class="form-group"><label>税额合计</label><input type="number" step="0.01" id="ext-tax-amount"></div>
+                <div class="form-group"><label>本公司主体</label><select id="ext-our-company"></select></div>
+              </div>
+            </fieldset>
+
+            <!-- 甲方信息 -->
+            <fieldset class="extract-section">
+              <legend>甲方信息 <select id="ext-party-a-side" class="inline-select"><option value="buyer">买方</option><option value="seller">卖方</option></select></legend>
+              <div class="form-row">
+                <div class="form-group"><label>公司名称</label><input type="text" id="ext-a-name"></div>
+                <div class="form-group"><label>法定代表人</label><input type="text" id="ext-a-legal"></div>
+              </div>
+              <div class="form-row">
+                <div class="form-group"><label>委托代理人</label><input type="text" id="ext-a-agent"></div>
+                <div class="form-group"><label>电话</label><input type="text" id="ext-a-phone"></div>
+              </div>
+              <div class="form-row">
+                <div class="form-group"><label>地址</label><input type="text" id="ext-a-address"></div>
+                <div class="form-group"><label>税号</label><input type="text" id="ext-a-tax"></div>
+              </div>
+              <div class="form-row">
+                <div class="form-group"><label>开户行</label><input type="text" id="ext-a-bank"></div>
+                <div class="form-group"><label>银行账号</label><input type="text" id="ext-a-account"></div>
+              </div>
+            </fieldset>
+
+            <!-- 乙方信息 -->
+            <fieldset class="extract-section">
+              <legend>乙方信息 <select id="ext-party-b-side" class="inline-select"><option value="seller">卖方</option><option value="buyer">买方</option></select></legend>
+              <div class="form-row">
+                <div class="form-group"><label>公司名称</label><input type="text" id="ext-b-name"></div>
+                <div class="form-group"><label>法定代表人</label><input type="text" id="ext-b-legal"></div>
+              </div>
+              <div class="form-row">
+                <div class="form-group"><label>委托代理人</label><input type="text" id="ext-b-agent"></div>
+                <div class="form-group"><label>电话</label><input type="text" id="ext-b-phone"></div>
+              </div>
+              <div class="form-row">
+                <div class="form-group"><label>地址</label><input type="text" id="ext-b-address"></div>
+                <div class="form-group"><label>税号</label><input type="text" id="ext-b-tax"></div>
+              </div>
+              <div class="form-row">
+                <div class="form-group"><label>开户行</label><input type="text" id="ext-b-bank"></div>
+                <div class="form-group"><label>银行账号</label><input type="text" id="ext-b-account"></div>
+              </div>
+            </fieldset>
+
+            <!-- 产品明细 -->
+            <fieldset class="extract-section">
+              <legend>📦 产品明细</legend>
+              <div class="table-container">
+                <table class="items-table">
+                  <thead><tr><th>#</th><th>产品名称</th><th>规格</th><th>数量</th><th>单位</th><th>单价</th><th>金额</th><th>税率%</th><th>税额</th></tr></thead>
+                  <tbody id="extract-items-body"></tbody>
+                </table>
+              </div>
+            </fieldset>
+
+            <div class="form-actions">
+              <button class="btn btn-secondary" onclick="goToUpload()">← 上一步</button>
+              <button class="btn btn-primary" onclick="saveImportedContract()">💾 保存合同</button>
+              <button class="btn btn-secondary" id="btn-create-template" onclick="createTemplate()">📋 同时保存为模板</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 导入历史 -->
+        <div class="import-panel" id="import-history-panel">
+          <h3>📜 导入历史</h3>
+          <div class="table-container">
+            <table class="data-table">
+              <thead><tr><th>文件名</th><th>类型</th><th>状态</th><th>导入时间</th><th>操作</th></tr></thead>
+              <tbody id="import-history-table"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+  
+  <!-- 模态框 -->
+  <div class="modal" id="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modal-title"></h3>
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+  
+  <script src="/js/app.js"></script>
+  <script src="/js/import.js"></script>
+</body>
+</html>
