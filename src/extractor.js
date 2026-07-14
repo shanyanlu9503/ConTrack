@@ -26,7 +26,7 @@ function extractEntities(rawText, fileType) {
     } else {
       fullText = fullText
         .replace(/\[[A-Z]+\d+\][ \t]*/g, '')
-        .replace(/[ \t]*\|[ \t]*/g, ' ');
+        .replace(/[ \t]*\|[ \t]*/g, '  ');
     }
   }
 
@@ -516,7 +516,8 @@ function extractContractFields(fullText) {
 
   // 逐行提取
   contract.contract_no = extractLineField(lines, [
-    /^合同编号[：:](.+)/, /^合同号[：:](.+)/, /^协议编号[：:](.+)/,
+    /^合同编号[：:](.+)/, /^合同号[：:](.+)/, /^合\s*同\s*号\s*[：:](.+)/, /^协议编号[：:](.+)/,
+    /合同编号[：:](.+)/, /合同号[：:](.+)/, /合\s*同\s*号\s*[：:](.+)/,
   ]);
 
   contract.sign_date = extractLineField(lines, [
