@@ -103,7 +103,17 @@ async function parseExcelText(filePath) {
         else if (typeof value === 'object' && value.richText) {
           value = value.richText.map(t => t.text || '').join('');
         } else if (typeof value === 'object' && value.result !== undefined) {
+          // Formula cell: extract result first, then check for date
           value = value.result;
+          if (value instanceof Date) {
+            value = formatDate(value);
+          } else if (typeof value === 'number' && value > 40000 && value < 60000 && (cell.numFmt && (cell.numFmt.includes('yy') || cell.numFmt.includes('dd')))) {
+            value = formatSerialDate(value);
+          }
+        } else if (value instanceof Date) {
+          value = formatDate(value);
+        } else if (typeof value === 'number' && value > 40000 && value < 60000 && (cell.type === 4 || cell.numFmt === 'yyyy-mm-dd' || (cell.numFmt && cell.numFmt.includes('yy')))) {
+          value = formatSerialDate(value);
         }
 
         const cellInfo = {
@@ -144,6 +154,21 @@ async function parseFile(filePath, fileType) {
     default:
       throw new Error('不支持的文件类型: ' + fileType);
   }
+}
+
+// ---- 日期格式化 ----
+
+function formatDate(d) {
+  if (!d || isNaN(d.getTime())) return '';
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+}
+
+function formatSerialDate(serial) {
+  // Excel 日期序列号转 JS Date (1900 日期系统)
+  const d = new Date(Math.round((serial - 25569) * 86400 * 1000));
+  return formatDate(d);
 }
 
 // ---- 工具函数 ----

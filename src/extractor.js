@@ -12,11 +12,22 @@ function extractEntities(rawText, fileType) {
   let fullText = rawText;
   let parties = null;
 
-  // 预处理1: Excel格式 - 剥离 [A1] 前缀并统一分隔符
+  // 预处理1: Excel格式 - 智能检测表格 vs 自由格式
   if (/\[[A-Z]+\d+\]/.test(rawText)) {
-    fullText = fullText
-      .replace(/\[[A-Z]+\d+\][ \t]*/g, '')
-      .replace(/[ \t]*\|[ \t]*/g, ' ||| ');
+    const lines = rawText.split('\n').filter(l => l.includes('|'));
+    const cellCounts = lines.map(l => l.split('|').length);
+    // 统计4列行的占比来判断是否为双栏表格
+    const fourColCount = cellCounts.filter(c => c === 4).length;
+    const isTableLayout = cellCounts.length >= 3 && (fourColCount / cellCounts.length) >= 0.4;
+    if (isTableLayout) {
+      fullText = fullText
+        .replace(/\[[A-Z]+\d+\][ \t]*/g, '')
+        .replace(/[ \t]*\|[ \t]*/g, ' ||| ');
+    } else {
+      fullText = fullText
+        .replace(/\[[A-Z]+\d+\][ \t]*/g, '')
+        .replace(/[ \t]*\|[ \t]*/g, ' ');
+    }
   }
 
   // 预处理2: 表格分隔符格式 (PDF/Excel)
@@ -148,6 +159,11 @@ function preprocessTableText(rawText) {
       if (bLabel && bLabel !== '方' && bValue) {
         partyBLines.push(`${mappedBLabel}：${bValue}`);
       }
+    } else if (cells.length >= 2) {
+      // 2-3列：key-value 格式，放入 otherLines 由逐行提取处理
+      for (const cell of cells) {
+        if (cell && cell.trim()) otherLines.push(cell.trim());
+      }
     }
   }
 
@@ -210,12 +226,12 @@ function detectInterleavedFormat(text) {
       labelCount.set(trimmed, (labelCount.get(trimmed) || 0) + 1);
     }
   }
-  // 至少有3个标签出现了2次 = 双栏结构
+  // 至少有2个标签出现了2次 = 双栏结构
   let dupCount = 0;
   for (const count of labelCount.values()) {
     if (count >= 2) dupCount++;
   }
-  return dupCount >= 3;
+  return dupCount >= 2;
 }
 
 /**
@@ -424,7 +440,8 @@ function extractFieldsFromSection(lines, role, side, fullText) {
   const fieldRules = [
     ['name', [
       /^单位名称[：:](.+)/, /^公司名称[：:](.+)/, /^企业名称[：:](.+)/,
-      /^'+role+'[：:](.+)/,
+      new RegExp('^'+role+'[：:]\\s*(\\S+[\\s\\S]*?)(?=\\s{2,}|$)'),
+      new RegExp('^'+role+'[：:](.+)'),
     ]],
     ['legal_representative', [
       /^法定代表人[：:](.+)/, /^法人代表[：:](.+)/, /^法\s*人[：:](.+)/, /^负责人[：:](.+)/,
@@ -529,8 +546,27 @@ function extractItems(fullText, fileType) {
   const items = [];
   const lines = fullText.split('\n');
 
-  // 方案A: 找到产品明细区域（"一、产品" 或 "产品名称" 等标记）
-  // 然后逐行提取 key: value 格式的产品信息
+  // 方案A: 检测表头行 + 列映射（优先级最高）
+  let headerIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/产品名称|品名/.test(line) && (/规格/.test(line) || /数量/.test(line) || /单价/.test(line))) {
+      headerIdx = i;
+      break;
+    }
+  }
+  if (headerIdx >= 0) {
+    const dataLines = [];
+    for (let i = headerIdx + 1; i < lines.length && i < headerIdx + 50; i++) {
+      if (/^[二三四五六七八九十]、/.test(lines[i])) break;
+      if (/合计人民币|总计|小计|备注|签订|盖章/.test(lines[i])) break;
+      dataLines.push(lines[i]);
+    }
+    const tableItems = extractItemsFromTableWithHeader(lines[headerIdx], dataLines);
+    if (tableItems && tableItems.length > 0) return tableItems;
+  }
+
+  // 方案B: 找到产品明细区域逐行提取 key: value 格式
   let inProductSection = false;
   let currentItem = {};
   let itemFields = {};
@@ -696,6 +732,68 @@ function buildItemFromParts(parts) {
     tax_rate: dataParts.length >= 7 ? parseFloat(dataParts[6]) || 13 : 13,
     tax_amount: dataParts.length >= 8 ? parseFloat(dataParts[7]) || 0 : 0
   });
+}
+
+/**
+ * 从表头行检测列映射，然后用映射提取数据行
+ */
+function extractItemsFromTableWithHeader(headerLine, dataLines) {
+  const items = [];
+  // 解析表头确定列映射
+  const headerParts = headerLine.split(/[\s]{2,}/).filter(h => h.trim());
+  const colMap = []; // colMap[index] = field name
+
+  for (const h of headerParts) {
+    const hLower = h.toLowerCase().replace(/\s/g, '');
+    if (/序号|#|no/i.test(hLower)) colMap.push('_skip');
+    else if (/产品名称|品名|商品名称|名称/.test(h)) colMap.push('product_name');
+    else if (/规格|型号|规格型号/.test(h)) colMap.push('specification');
+    else if (/含税单价|单价|价格/.test(h)) colMap.push('unit_price');
+    else if (/数量/.test(h)) colMap.push('quantity');
+    else if (/单位/.test(h)) colMap.push('unit');
+    else if (/总额|金额|总价|合计金额/.test(h)) colMap.push('amount');
+    else if (/税率/.test(h)) colMap.push('tax_rate');
+    else if (/税额/.test(h)) colMap.push('tax_amount');
+    else if (/备注/.test(h)) colMap.push('remark');
+    else colMap.push('_unknown');
+  }
+
+  // 如果没检测到合理映射，回退到默认顺序
+  if (!colMap.includes('product_name')) {
+    return null;
+  }
+
+  // 处理数据行
+  for (const line of dataLines) {
+    if (/合计|总计|备注|签订|盖章/.test(line)) continue;
+    if (line.trim().length < 5) continue;
+
+    const dataParts = line.split(/[\s]{2,}/).filter(p => p.trim());
+    if (dataParts.length < 2) continue;
+
+    const item = { tax_rate: 13, tax_amount: 0 };
+
+    // colMap 和 dataParts 按位置一一对应（表头已包含序号列）
+    for (let i = 0; i < colMap.length && i < dataParts.length; i++) {
+      const field = colMap[i];
+      if (field === '_skip' || field === '_unknown') continue;
+      const val = dataParts[i]?.trim();
+      if (!val || val === '') continue;
+
+      if (field === 'product_name' || field === 'specification' || field === 'unit') {
+        item[field] = cleanValue(val);
+      } else {
+        const numVal = parseFloat(val.replace(/[,，\s]/g, ''));
+        if (!isNaN(numVal)) item[field] = numVal;
+      }
+    }
+
+    if (item.product_name || item.amount > 0 || (item.quantity > 0 && item.unit_price > 0)) {
+      items.push(finalizeItem(item));
+    }
+  }
+
+  return items;
 }
 
 // ==================== 阶段 5: 类型推断与校验 ====================
