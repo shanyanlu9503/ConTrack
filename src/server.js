@@ -429,6 +429,25 @@ app.post('/api/import/extract', async (req, res) => {
 
     const extracted = extractEntities(record.raw_text, record.file_type);
 
+    // 自动补全：按名称匹配数据库已有公司，填充缺失字段
+    if (extracted.parties) {
+      for (const party of extracted.parties) {
+        if (!party.name || !party.name.trim()) continue;
+        // 按名称查找
+        const existing = get('SELECT * FROM companies WHERE name = ?', [party.name.trim()]);
+        if (existing) {
+          // 仅当提取值为空时才用数据库值填充
+          if (!party.address) party.address = existing.address || '';
+          if (!party.legal_representative) party.legal_representative = existing.legal_representative || '';
+          if (!party.agent) party.agent = existing.agent || '';
+          if (!party.phone) party.phone = existing.phone || '';
+          if (!party.bank) party.bank = existing.bank || '';
+          if (!party.bank_account) party.bank_account = existing.bank_account || '';
+          if (!party.tax_number) party.tax_number = existing.tax_number || '';
+        }
+      }
+    }
+
     // 存储提取结果
     const extractedJson = JSON.stringify(extracted);
     run('UPDATE imported_files SET extracted_data = ?, status = ? WHERE id = ?',
